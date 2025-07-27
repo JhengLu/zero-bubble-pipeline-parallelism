@@ -1,3 +1,7 @@
+```sh
+git clone --recursive https://github.com/JhengLu/zero-bubble-pipeline-parallelism.git
+```
+
 This repository is a fork of [Megatron-LM](https://github.com/NVIDIA/Megatron-LM/). The original README can be found [here](Megatron.md).
 
 # Zero Bubble Pipeline Parallelism & Pipeline Parallelism with Controllable Memory
