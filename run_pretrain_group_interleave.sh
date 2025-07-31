@@ -9,7 +9,7 @@ LOG_PID=$!
 #ZERO_BUBBLE_V_SCHEDULE=1 
 
 # Run training
-./pretrain_zero_bubble.sh >> train_zero_bubble.log 2>&1
+./pretrain_group_interleave.sh >> train_zero_bubble.log 2>&1
 
 # After training finishes, kill the logging process
 kill $LOG_PID
@@ -33,7 +33,7 @@ RESULT_DIR="${RESULT_BASE}/result_${NEXT_INDEX}"
 mkdir -p "$RESULT_DIR"
 
 # Copy result files
-cp gpu_log.csv pretrain_zero_bubble.sh train_zero_bubble.log run_pretrain_original.sh "$RESULT_DIR"
+cp gpu_log.csv pretrain_group_interleave.sh train_zero_bubble.log run_pretrain_group_interleave.sh "$RESULT_DIR"
 
 python data/zero_bubble_result/plot_memory.py  $RESULT_DIR
 python data/zero_bubble_result/plot_multiple_info.py  $RESULT_DIR
