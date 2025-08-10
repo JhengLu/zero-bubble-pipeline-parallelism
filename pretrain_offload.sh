@@ -3,39 +3,41 @@
 
 #SBATCH <SLURM OPTIONS> --nodes=128 --exclusive --ntasks-per-node=8 --job-name=megatron_gpt3_175b
 
-export CUDA_DEVICE_MAX_CONNECTIONS=8
-export GQA=8
-
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 DIR=`pwd`
 DATETIME=`date +'date_%y-%m-%d_time_%H-%M-%S'`
 mkdir -p $DIR/logs
+
+pip install pulp sentencepiece
 
 DATASET_DIR='/tmp/zb_sample_dataset'
 DATASET="${DATASET_DIR}/dataset/c4_text_document"
 TOKENIZER="${DATASET_DIR}/tokenizers/tokenizer.model"
 
 if [ ! -e "$DATASET"".idx" ]; then
-  wget https://huggingface.co/datasets/ufotalent/zero_bubble_sample_dataset/resolve/main/zb_sample_dataset.tar.gz
+  if [ ! -e "zb_sample_dataset.tar.gz" ]; then
+    wget https://huggingface.co/datasets/ufotalent/zero_bubble_sample_dataset/resolve/main/zb_sample_dataset.tar.gz
+  fi
   tar -xvf zb_sample_dataset.tar.gz -C /tmp
 fi
+
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Running locally
 if [ -z "$WORLD_SIZE" ]; then
   export WORLD_SIZE=1
   export RANK=0
   export MASTER_ADDR=localhost
-  export MASTER_PORT=10086
+  export MASTER_PORT=10088
 fi
 
 if [ -z "$GPUS_PER_NODE" ]; then
   GPUS_PER_NODE=$(nvidia-smi --list-gpus | wc -l)
-  # GPUS_PER_NODE=1
 fi
 
 if [ -z "$EXIT_INTERVAL" ]; then
-  EXIT_INTERVAL=100
+  EXIT_INTERVAL=30
 fi
 
 if [ -z "$LOG_INTERVAL" ]; then
@@ -45,13 +47,15 @@ fi
 WORLD_SIZE_IN_GPUS=$(( $WORLD_SIZE * $GPUS_PER_NODE ))
 
 if [ -z "$PIPELINE_SIZE" ]; then
-  PIPELINE_SIZE=8
-  LAYERS=16
+  PIPELINE_SIZE=$(( $WORLD_SIZE_IN_GPUS ))
+  LAYERS=$(( $PIPELINE_SIZE * 3 - 2))
   MICRO_BATCH_SIZE=1
-  GLOBAL_BATCH_SIZE=16
-  HIDDEN_SIZE=6144
-  ATTENTION_HEADS=64
+  GLOBAL_BATCH_SIZE=$(( $PIPELINE_SIZE * 2 * $MICRO_BATCH_SIZE ))
+  HIDDEN_SIZE=4096
+  FFN_HIDDEN_SIZE=16384
+  ATTENTION_HEADS=32
   ZERO_BUBBLE_MEM_LIMIT=$((2 * $PIPELINE_SIZE))
+  GQA=8
 fi
 
 profile_ranks="0"
@@ -59,8 +63,8 @@ for ((i = 1; i < $WORLD_SIZE_IN_GPUS; i++)); do
     profile_ranks="$profile_ranks $i"
 done
 if [ -z "$ZERO_BUBBLE_TIMER_START" ]; then
-  ZERO_BUBBLE_TIMER_START=50
-  ZERO_BUBBLE_TIMER_END=60
+  ZERO_BUBBLE_TIMER_START=100
+  ZERO_BUBBLE_TIMER_END=110
 fi
 
 if [ -z "$EVAL_INTERVAL" ]; then
@@ -68,24 +72,35 @@ if [ -z "$EVAL_INTERVAL" ]; then
 fi
 
 if [ -z "$TP_SIZE" ]; then
-  TP_SIZE=1
+TP_SIZE=1
 fi
 
+if [ -z "$SEQ_LENGTH" ]; then
+  SEQ_LENGTH=8192
+fi
+
+if [ -z "$FFN_HIDDEN_SIZE" ]; then
+  FFN_HIDDEN_SIZE=$(( $HIDDEN_SIZE * 4 ))
+fi
+
+TRAIN_SAMPLES=$(( 146484375 * 1024 / $SEQ_LENGTH ))
+LR_DECAY_SAMPLES=$(( 126953125 * 1024 / $SEQ_LENGTH ))
 options=" \
   --tensor-model-parallel-size $TP_SIZE \
   --pipeline-model-parallel-size $PIPELINE_SIZE \
   --num-layers $LAYERS \
   --hidden-size $HIDDEN_SIZE \
+  --ffn-hidden-size $FFN_HIDDEN_SIZE \
   --num-attention-heads $ATTENTION_HEADS \
-  --exit-interval $EXIT_INTERVAL \
-  --seq-length 4096 \
-  --max-position-embeddings 8192 \
-  --micro-batch-size $MICRO_BATCH_SIZE \
-  --global-batch-size $GLOBAL_BATCH_SIZE \
   --group-query-attention \
   --num-query-groups $GQA \
-  --train-samples 146484375 \
-  --lr-decay-samples 126953125 \
+  --exit-interval $EXIT_INTERVAL \
+  --seq-length $SEQ_LENGTH \
+  --max-position-embeddings $SEQ_LENGTH \
+  --micro-batch-size $MICRO_BATCH_SIZE \
+  --global-batch-size $GLOBAL_BATCH_SIZE \
+  --train-samples $TRAIN_SAMPLES \
+  --lr-decay-samples $LR_DECAY_SAMPLES \
   --lr-warmup-samples 183105 \
   --lr 6.0e-5 \
   --min-lr 6.0e-6 \
@@ -103,17 +118,23 @@ options=" \
   --adam-beta2 0.95 \
   --init-method-std 0.006 \
   --no-barrier-with-level-1-timing \
-  --profile-step-start 15 \
-  --profile-step-end 17 \
-  --untie-embeddings-and-output-weights \
-  --use-legacy-models \
-  --sequence-parallel \
-  --use-flash-attn \
+  --profile-step-start 3 \
+  --profile-step-end 6 \
   --transformer-impl local \
-  --use-distributed-optimizer \
-  --enable-zb-runtime \
+  --use-legacy-models \
+  --use-flash-attn \
+  --no-bias-dropout-fusion \
   --no-create-attention-mask-in-dataloader \
-  --profile-ranks $profile_ranks "
+  --untie-embeddings-and-output-weights \
+  --allow-padding-num-layers \
+  --initial-loss-scale 65536 \
+  --sequence-parallel \
+  --recompute-lgd \
+  --measure-activation-memory \
+  --use-tp-pp-dp-mapping \
+  --offload-continuous-buffers \
+  --profile-ranks $profile_ranks"
+
 
 if [ -z "$FP32" ]; then
   options="$options --fp16"
@@ -148,22 +169,38 @@ fi
 
 if [ ! -z "$INTERLEAVED_1F1B" ]; then
   options="$options --num-layers-per-virtual-pipeline-stage 1"
+  if [ ! -z "$INTERLEAVE_GROUP" ]; then
+    options="$options --interleave-group-size $INTERLEAVE_GROUP --enable-zb-runtime"
+    if [ ! -z "$OFFLOAD" ]; then
+      if [ ! -z "$OFFLOAD_TIME" ]; then
+        options="$options --offload-time $OFFLOAD_TIME --offload-chunk-num $OFFLOAD_CHUNK_NUM"
+      else
+        options="$options --auto-offload-time --offload-chunk-num $OFFLOAD_CHUNK_NUM"
+      fi
+    fi
+  else
+    options="$options --no-pre-communication-optimization"
+  fi 
+else
+  options="$options --no-pre-communication-optimization"
 fi
-OUT_REP="gpu_profile.ncu-rep"
 
-run_cmd="sudo -E ncu \
-  --target-processes all \
-  --section MemoryWorkloadAnalysis \
-  --replay-mode application \
-  --export ${OUT_REP} \
-  --log-file ncu.log \
-  torchrun --nnodes $WORLD_SIZE \
+if [ ! -z "$OFFLOAD" ]; then
+  options="$options --cpu-offload "
+  if [ ! -z "$NO_BARRIER" ]; then
+    options="$options --no-paired-barrier "
+  fi
+fi
+
+if [ ! -z "$DISTRIBUTED_OPTIMIZER" ]; then
+  options="$options --use-distributed-optimizer"
+fi
+
+run_cmd="torchrun --nnodes $WORLD_SIZE \
   --node_rank $RANK \
   --master_addr $MASTER_ADDR \
   --master_port $MASTER_PORT \
   --nproc_per_node=$GPUS_PER_NODE ${DIR}/pretrain_gpt.py $@ ${options} ${EXTRA_OPTIONS}"
-
-
 
 if [ ! -z "$PROFILED" ]; then
   run_cmd="nsys profile -s none -t nvtx,cuda \
@@ -176,7 +213,6 @@ fi
 
 echo $run_cmd
 # sleep 100000
-eval $run_cmd
-#eval $run_cmd > >(tee log.$AIP_RUN_NAME) 2>&1
+eval $run_cmd 2>&1 | tee log.$AIP_RUN_NAME
 
 set +x
