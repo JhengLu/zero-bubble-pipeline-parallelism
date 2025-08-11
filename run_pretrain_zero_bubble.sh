@@ -2,7 +2,8 @@
 
 rm -f train_zero_bubble.log
 rm -f gpu_log.csv
-rm -f gpu_profile.ncu-rep
+rm -rf ./memsnaps
+rm -rf ./torchprof
 
 # Start GPU logging in background and record its PID
 ./log_gpu.sh &
@@ -33,7 +34,10 @@ RESULT_DIR="${RESULT_BASE}/result_${NEXT_INDEX}"
 mkdir -p "$RESULT_DIR"
 
 # Copy result files
-cp gpu_log.csv pretrain_zero_bubble.sh train_zero_bubble.log run_pretrain_zero_bubble.sh ncu.log gpu_profile.ncu-rep "$RESULT_DIR"
+cp gpu_log.csv pretrain_zero_bubble.sh train_zero_bubble.log run_pretrain_zero_bubble.sh "$RESULT_DIR"
+cp -r ./memsnaps "$RESULT_DIR"
+cp -r ./torchprof "$RESULT_DIR"
 
 python data/zero_bubble_result/plot_memory.py  $RESULT_DIR
 python data/zero_bubble_result/plot_multiple_info.py  $RESULT_DIR
+python data/zero_bubble_result/plot_activation_memory.py  $RESULT_DIR

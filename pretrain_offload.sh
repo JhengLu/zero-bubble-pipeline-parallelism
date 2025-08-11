@@ -47,13 +47,12 @@ fi
 WORLD_SIZE_IN_GPUS=$(( $WORLD_SIZE * $GPUS_PER_NODE ))
 
 if [ -z "$PIPELINE_SIZE" ]; then
-  PIPELINE_SIZE=$(( $WORLD_SIZE_IN_GPUS ))
-  LAYERS=$(( $PIPELINE_SIZE * 3 - 2))
+  PIPELINE_SIZE=8
+  LAYERS=16
   MICRO_BATCH_SIZE=1
-  GLOBAL_BATCH_SIZE=$(( $PIPELINE_SIZE * 2 * $MICRO_BATCH_SIZE ))
-  HIDDEN_SIZE=4096
-  FFN_HIDDEN_SIZE=16384
-  ATTENTION_HEADS=32
+  GLOBAL_BATCH_SIZE=16
+  HIDDEN_SIZE=6144
+  ATTENTION_HEADS=64
   ZERO_BUBBLE_MEM_LIMIT=$((2 * $PIPELINE_SIZE))
   GQA=8
 fi
@@ -96,7 +95,7 @@ options=" \
   --num-query-groups $GQA \
   --exit-interval $EXIT_INTERVAL \
   --seq-length $SEQ_LENGTH \
-  --max-position-embeddings $SEQ_LENGTH \
+  --max-position-embeddings 8192 \
   --micro-batch-size $MICRO_BATCH_SIZE \
   --global-batch-size $GLOBAL_BATCH_SIZE \
   --train-samples $TRAIN_SAMPLES \

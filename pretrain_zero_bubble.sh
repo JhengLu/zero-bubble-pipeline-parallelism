@@ -35,7 +35,7 @@ if [ -z "$GPUS_PER_NODE" ]; then
 fi
 
 if [ -z "$EXIT_INTERVAL" ]; then
-  EXIT_INTERVAL=100
+  EXIT_INTERVAL=50
 fi
 
 if [ -z "$LOG_INTERVAL" ]; then
@@ -113,6 +113,7 @@ options=" \
   --use-distributed-optimizer \
   --enable-zb-runtime \
   --no-create-attention-mask-in-dataloader \
+  --measure-activation-memory \
   --profile-ranks $profile_ranks "
 
 if [ -z "$FP32" ]; then
@@ -149,21 +150,12 @@ fi
 if [ ! -z "$INTERLEAVED_1F1B" ]; then
   options="$options --num-layers-per-virtual-pipeline-stage 1"
 fi
-OUT_REP="gpu_profile.ncu-rep"
 
-run_cmd="sudo -E ncu \
-  --target-processes all \
-  --section MemoryWorkloadAnalysis \
-  --replay-mode application \
-  --export ${OUT_REP} \
-  --log-file ncu.log \
-  torchrun --nnodes $WORLD_SIZE \
+run_cmd="torchrun --nnodes $WORLD_SIZE \
   --node_rank $RANK \
   --master_addr $MASTER_ADDR \
   --master_port $MASTER_PORT \
   --nproc_per_node=$GPUS_PER_NODE ${DIR}/pretrain_gpt.py $@ ${options} ${EXTRA_OPTIONS}"
-
-
 
 if [ ! -z "$PROFILED" ]; then
   run_cmd="nsys profile -s none -t nvtx,cuda \

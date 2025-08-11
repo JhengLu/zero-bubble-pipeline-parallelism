@@ -7,7 +7,7 @@ rm -f gpu_log.csv
 # Start GPU logging in background and record its PID
 ./log_gpu.sh &
 LOG_PID=$!
-export OFFLOAD=1
+# export OFFLOAD=1
 export INTERLEAVED_1F1B=1
 export INTERLEAVE_GROUP=8
 export OFFLOAD_CHUNK_NUM=1
