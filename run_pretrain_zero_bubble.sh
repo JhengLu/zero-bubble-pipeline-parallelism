@@ -34,7 +34,7 @@ RESULT_DIR="${RESULT_BASE}/result_${NEXT_INDEX}"
 mkdir -p "$RESULT_DIR"
 
 # Copy result files
-cp gpu_log.csv pretrain_zero_bubble.sh train_zero_bubble.log run_pretrain_zero_bubble.sh "$RESULT_DIR"
+cp gpu_log.csv pretrain_zero_bubble.sh train_zero_bubble.log run_pretrain_zero_bubble.sh megatron/training/training.py "$RESULT_DIR"
 cp -r ./memsnaps "$RESULT_DIR"
 cp -r ./torchprof "$RESULT_DIR"
 
